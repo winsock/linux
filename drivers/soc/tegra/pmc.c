@@ -17,6 +17,7 @@
  *
  */
 
+#define DEBUG
 #define pr_fmt(fmt) "tegra-pmc: " fmt
 
 #include <linux/kernel.h>
@@ -31,8 +32,10 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
+#include <linux/pm_domain.h>
 #include <linux/reboot.h>
 #include <linux/reset.h>
+#include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <linux/spinlock.h>
 
@@ -101,6 +104,18 @@
 
 #define GPU_RG_CNTRL			0x2d4
 
+struct tegra_powergate {
+	struct generic_pm_domain base;
+	struct tegra_pmc *pmc;
+	unsigned int id;
+};
+
+static inline struct tegra_powergate *
+to_powergate(struct generic_pm_domain *domain)
+{
+	return container_of(domain, struct tegra_powergate, base);
+}
+
 struct tegra_pmc_soc {
 	unsigned int num_powergates;
 	const char *const *powergates;
@@ -113,8 +128,10 @@ struct tegra_pmc_soc {
 
 /**
  * struct tegra_pmc - NVIDIA Tegra PMC
+ * @dev: pointer to parent device
  * @base: pointer to I/O remapped register region
  * @clk: pointer to pclk clock
+ * @soc: SoC-specific data
  * @rate: currently configured rate of pclk
  * @suspend_mode: lowest suspend mode available
  * @cpu_good_time: CPU power good time (in microseconds)
@@ -128,7 +145,9 @@ struct tegra_pmc_soc {
  * @cpu_pwr_good_en: CPU power good signal is enabled
  * @lp0_vec_phys: physical base address of the LP0 warm boot code
  * @lp0_vec_size: size of the LP0 warm boot code
+ * @powergates: list of power gates
  * @powergates_lock: mutex for power gate register access
+ * @nb: bus notifier for generic power domains
  */
 struct tegra_pmc {
 	struct device *dev;
@@ -152,7 +171,9 @@ struct tegra_pmc {
 	u32 lp0_vec_phys;
 	u32 lp0_vec_size;
 
+	struct tegra_powergate *powergates;
 	struct mutex powergates_lock;
+	struct notifier_block nb;
 };
 
 static struct tegra_pmc *pmc = &(struct tegra_pmc) {
@@ -375,6 +396,8 @@ int tegra_pmc_cpu_remove_clamping(int cpuid)
 	if (id < 0)
 		return id;
 
+	usleep_range(10, 20);
+
 	return tegra_powergate_remove_clamping(id);
 }
 #endif /* CONFIG_SMP */
@@ -412,6 +435,130 @@ static struct notifier_block tegra_pmc_restart_handler = {
 	.notifier_call = tegra_pmc_restart_notify,
 	.priority = 128,
 };
+
+static bool tegra_pmc_powergate_is_powered(struct tegra_powergate *powergate)
+{
+	u32 status = tegra_pmc_readl(PWRGATE_STATUS);
+
+	return (status & BIT(powergate->id)) != 0;
+}
+
+static int tegra_pmc_powergate_set(struct tegra_powergate *powergate,
+				   bool new_state)
+{
+	u32 status, mask = new_state ? BIT(powergate->id) : 0;
+	bool state = false;
+
+	mutex_lock(&pmc->powergates_lock);
+
+	/* check the current state of the partition */
+	status = tegra_pmc_readl(PWRGATE_STATUS);
+	if (status & BIT(powergate->id))
+		state = true;
+
+	/* nothing to do */
+	if (new_state == state) {
+		mutex_unlock(&pmc->powergates_lock);
+		return 0;
+	}
+
+	/* toggle partition state and wait for state change to finish */
+	tegra_pmc_writel(PWRGATE_TOGGLE_START | powergate->id, PWRGATE_TOGGLE);
+
+	while (1) {
+		status = tegra_pmc_readl(PWRGATE_STATUS);
+		if ((status & BIT(powergate->id)) == mask)
+			break;
+
+		usleep_range(10, 20);
+	}
+
+	mutex_unlock(&pmc->powergates_lock);
+
+	return 0;
+}
+
+static int
+tegra_pmc_powergate_remove_clamping(struct tegra_powergate *powergate)
+{
+	u32 mask;
+
+	/*
+	 * The Tegra124 GPU has a separate register (with different semantics)
+	 * to remove clamps.
+	 */
+	if (tegra_get_chip_id() == TEGRA124) {
+		if (powergate->id == TEGRA_POWERGATE_3D) {
+			tegra_pmc_writel(0, GPU_RG_CNTRL);
+			return 0;
+		}
+	}
+
+	/*
+	 * Tegra 2 has a bug where PCIE and VDE clamping masks are
+	 * swapped relatively to the partition ids
+	 */
+	if (powergate->id == TEGRA_POWERGATE_VDEC)
+		mask = (1 << TEGRA_POWERGATE_PCIE);
+	else if (powergate->id == TEGRA_POWERGATE_PCIE)
+		mask = (1 << TEGRA_POWERGATE_VDEC);
+	else
+		mask = (1 << powergate->id);
+
+	tegra_pmc_writel(mask, REMOVE_CLAMPING);
+
+	return 0;
+}
+
+static int tegra_pmc_powergate_power_on(struct generic_pm_domain *domain)
+{
+	struct tegra_powergate *powergate = to_powergate(domain);
+	struct tegra_pmc *pmc = powergate->pmc;
+	int err = 0;
+
+	dev_dbg(pmc->dev, "> %s(domain=%p)\n", __func__, domain);
+	dev_dbg(pmc->dev, "  name: %s\n", domain->name);
+
+	err = tegra_pmc_powergate_set(powergate, true);
+	if (err < 0)
+		goto out;
+
+	err = tegra_pmc_powergate_remove_clamping(powergate);
+
+out:
+	dev_dbg(pmc->dev, "< %s() = %d\n", __func__, err);
+	return err;
+}
+
+static int tegra_pmc_powergate_power_off(struct generic_pm_domain *domain)
+{
+	struct tegra_powergate *powergate = to_powergate(domain);
+	struct tegra_pmc *pmc = powergate->pmc;
+	int err = 0;
+
+	dev_dbg(pmc->dev, "> %s(domain=%p)\n", __func__, domain);
+	dev_dbg(pmc->dev, "  name: %s\n", domain->name);
+
+	/* never turn off this partition */
+	switch (powergate->id) {
+	case TEGRA_POWERGATE_CPU:
+	case TEGRA_POWERGATE_CPU1:
+	case TEGRA_POWERGATE_CPU2:
+	case TEGRA_POWERGATE_CPU3:
+	case TEGRA_POWERGATE_CPU0:
+	case TEGRA_POWERGATE_C0NC:
+	case TEGRA_POWERGATE_IRAM:
+		dev_dbg(pmc->dev, "not disabling always-on partition %s\n",
+			domain->name);
+		goto out;
+	}
+
+	err = tegra_pmc_powergate_set(powergate, false);
+
+out:
+	dev_dbg(pmc->dev, "< %s() = %d\n", __func__, err);
+	return err;
+}
 
 static int powergate_show(struct seq_file *s, void *data)
 {
@@ -453,6 +600,81 @@ static int tegra_powergate_debugfs_init(void)
 		return -ENOMEM;
 
 	return 0;
+}
+
+static struct generic_pm_domain *
+tegra_powergate_of_xlate(struct of_phandle_args *args, void *data)
+{
+	struct tegra_pmc *pmc = data;
+	unsigned int i;
+
+	dev_dbg(pmc->dev, "> %s(args=%p, data=%p)\n", __func__, args, data);
+
+	for (i = 0; i < pmc->soc->num_powergates; i++) {
+		struct tegra_powergate *powergate = &pmc->powergates[i];
+
+		if (!powergate->base.name)
+			continue;
+
+		if (powergate->id == args->args[0]) {
+			dev_dbg(pmc->dev, "< %s() = %p\n", __func__, powergate);
+			return &powergate->base;
+		}
+	}
+
+	dev_dbg(pmc->dev, "< %s() = -ENOENT\n", __func__);
+	return ERR_PTR(-ENOENT);
+}
+
+static int tegra_powergate_init(struct tegra_pmc *pmc)
+{
+	struct device_node *np = pmc->dev->of_node;
+	struct tegra_powergate *powergate;
+	unsigned int i;
+	int err = 0;
+
+	dev_dbg(pmc->dev, "> %s(pmc=%p)\n", __func__, pmc);
+
+	pmc->powergates = devm_kcalloc(pmc->dev, pmc->soc->num_powergates,
+				       sizeof(*powergate), GFP_KERNEL);
+	if (!pmc->powergates) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < pmc->soc->num_powergates; i++) {
+		bool off;
+
+		/* the powergate table may have gaps */
+		if (!pmc->soc->powergates[i])
+			continue;
+
+		powergate = &pmc->powergates[i];
+
+		powergate->base.name = kstrdup(pmc->soc->powergates[i],
+					       GFP_KERNEL);
+		powergate->base.power_off = tegra_pmc_powergate_power_off;
+		powergate->base.power_on = tegra_pmc_powergate_power_on;
+
+		powergate->pmc = pmc;
+		powergate->id = i;
+
+		off = !tegra_pmc_powergate_is_powered(powergate);
+		pm_genpd_init(&powergate->base, NULL, off);
+	}
+
+	err = __of_genpd_add_provider(np, tegra_powergate_of_xlate, pmc);
+	if (err < 0)
+		return err;
+
+#if 0
+	pmc->nb.notifier_call = tegra_powergate_notifier_call;
+	bus_register_notifier(&platform_bus_type, &pmc->nb);
+#endif
+
+out:
+	dev_dbg(pmc->dev, "< %s() = %d\n", __func__, err);
+	return err;
 }
 
 static int tegra_io_rail_prepare(int id, unsigned long *request,
@@ -809,6 +1031,8 @@ static int tegra_pmc_probe(struct platform_device *pdev)
 	struct resource *res;
 	int err;
 
+	dev_dbg(&pdev->dev, "> %s(pdev=%p)\n", __func__, pdev);
+
 	err = tegra_pmc_parse_dt(pmc, pdev->dev.of_node);
 	if (err < 0)
 		return err;
@@ -834,6 +1058,12 @@ static int tegra_pmc_probe(struct platform_device *pdev)
 
 	tegra_pmc_init_tsense_reset(pmc);
 
+	if (0 && IS_ENABLED(CONFIG_PM_GENERIC_DOMAINS)) {
+		err = tegra_powergate_init(pmc);
+		if (err < 0)
+			return err;
+	}
+
 	if (IS_ENABLED(CONFIG_DEBUG_FS)) {
 		err = tegra_powergate_debugfs_init();
 		if (err < 0)
@@ -847,6 +1077,7 @@ static int tegra_pmc_probe(struct platform_device *pdev)
 		return err;
 	}
 
+	dev_dbg(&pdev->dev, "< %s()\n", __func__);
 	return 0;
 }
 
