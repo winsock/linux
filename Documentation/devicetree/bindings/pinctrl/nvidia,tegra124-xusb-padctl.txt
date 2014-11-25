@@ -29,9 +29,25 @@ Required properties:
   - xusb
 
 Optional properties:
--------------------
-- vbus-{0,1,2}-supply: VBUS regulator for the corresponding UTMI pad.
+--------------------
 - vddio-hsic-supply: VDDIO regulator for the HSIC pads.
+
+PHY nodes:
+----------
+
+An optional child node named "phys" can contain nodes describing additional
+properties of each PHY. Only USB3 and UTMI PHYs can be complemented in this
+way, in which case the name of each node must match one of the following:
+
+  usb3-0, usb3-1, utmi-0, utmi-1, utmi-2
+
+Required properties for USB3 PHYs:
+- nvidia,lanes: specifies the name of the lane that this USB3 PHY uses
+- nvidia,port: specifies the number of the USB2 port that is used for this
+  USB3 PHY
+
+Optional properties for UTMI PHYs:
+- vbus-supply: regulator providing the VBUS voltage for the UTMI pad
 
 Lane muxing:
 ------------
@@ -98,9 +114,7 @@ divided into four groups:
 
     Valid functions for this group are: "pcie", "usb3", "sata", "rsvd".
 
-    Only the nvidia,iddq, nvidia,usb2-port, and nvidia,usb3-port properties
-    apply. The nvidia,usb2-port and nvidia,usb3-port properties are required
-    when the function is usb3.
+    Only the nvidia,iddq property applies.
 
 Example:
 ========
@@ -148,7 +162,24 @@ Board file extract:
 		pinctrl-0 = <&padctl_default>;
 		pinctrl-names = "default";
 
-		vbus-2-supply = <&vdd_usb3_vbus>;
+		phys {
+			usb3-0 {
+				status = "okay";
+
+				nvidia,lanes = "pcie-0";
+				nvidia,port = <2>;
+			};
+
+			utmi-1 {
+				status = "okay";
+			};
+
+			utmi-2 {
+				status = "okay";
+
+				vbus-supply = <&vdd_usb3_vbus>;
+			};
+		};
 
 		padctl_default: pinmux {
 			otg {
