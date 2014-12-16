@@ -709,8 +709,7 @@ bool amdgpu_crtc_scaling_mode_fixup(struct drm_crtc *crtc,
  * Retrieve current video scanout position of crtc on a given gpu, and
  * an optional accurate timestamp of when query happened.
  *
- * \param dev Device to query.
- * \param pipe Crtc to query.
+ * \param crtc CRTC to query.
  * \param flags Flags from caller (DRM_CALLED_FROM_VBLIRQ or 0).
  * \param *vpos Location where vertical scanout position should be stored.
  * \param *hpos Location where horizontal scanout position should go.
@@ -733,16 +732,16 @@ bool amdgpu_crtc_scaling_mode_fixup(struct drm_crtc *crtc,
  * unknown small number of scanlines wrt. real scanout position.
  *
  */
-int amdgpu_get_crtc_scanoutpos(struct drm_device *dev, unsigned int pipe,
-			       unsigned int flags, int *vpos, int *hpos,
-			       ktime_t *stime, ktime_t *etime,
+int amdgpu_get_crtc_scanoutpos(struct drm_crtc *crtc, unsigned int flags,
+			       int *vpos, int *hpos, ktime_t *stime,
+			       ktime_t *etime,
 			       const struct drm_display_mode *mode)
 {
+	struct amdgpu_device *adev = crtc->dev->dev_private;
+	unsigned int pipe = drm_crtc_index(crtc);
 	u32 vbl = 0, position = 0;
 	int vbl_start, vbl_end, vtotal, ret = 0;
 	bool in_vbl = true;
-
-	struct amdgpu_device *adev = dev->dev_private;
 
 	/* preempt_disable_rt() should go right here in PREEMPT_RT patchset. */
 
