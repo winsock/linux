@@ -508,12 +508,25 @@ tegra_gem_prime_map_dma_buf(struct dma_buf_attachment *attach,
 			    enum dma_data_direction dir)
 {
 	struct drm_gem_object *gem = attach->dmabuf->priv;
+	struct tegra_drm *tegra = gem->dev->dev_private;
 	struct tegra_bo *bo = to_tegra_bo(gem);
 	struct sg_table *sgt;
 
-	sgt = kmalloc(sizeof(*sgt), GFP_KERNEL);
-	if (!sgt)
-		return NULL;
+	if (tegra->domain) {
+		struct scatterlist *sg;
+		int i;
+
+		sgt = drm_prime_pages_to_sg(bo->pages, bo->num_pages);
+		if (!sgt)
+			return NULL;
+		for_each_sg(sgt->sgl, sg, sgt->nents, i) {
+			sg_dma_address(sg) = sg_phys(sg);
+			sg_dma_len(sg) = sg->length;
+		}
+	} else {
+		sgt = kmalloc(sizeof(*sgt), GFP_KERNEL);
+		if (!sgt)
+			return NULL;
 
 	if (bo->pages) {
 		struct scatterlist *sg;
@@ -533,6 +546,7 @@ tegra_gem_prime_map_dma_buf(struct dma_buf_attachment *attach,
 
 		sg_dma_address(sgt->sgl) = bo->paddr;
 		sg_dma_len(sgt->sgl) = gem->size;
+	}
 	}
 
 	return sgt;
