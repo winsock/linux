@@ -666,6 +666,36 @@
 		reset-names = "padctl";
 
 		#phy-cells = <1>;
+
+		phys {
+			pcie-0 {
+				status = "disabled";
+			};
+
+			sata-0 {
+				status = "disabled";
+			};
+
+			usb3-0 {
+				status = "disabled";
+			};
+
+			usb3-1 {
+				status = "disabled";
+			};
+
+			utmi-0 {
+				status = "disabled";
+			};
+
+			utmi-1 {
+				status = "disabled";
+			};
+
+			utmi-2 {
+				status = "disabled";
+			};
+		};
 	};
 
 	sdhci@0,700b0000 {
