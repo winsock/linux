@@ -5,6 +5,7 @@
 #include <dt-bindings/pinctrl/pinctrl-tegra-xusb.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/power/tegra-powergate.h>
+#include <dt-bindings/thermal/tegra210-soctherm.h>
 
 / {
 	compatible = "nvidia,tegra210";
