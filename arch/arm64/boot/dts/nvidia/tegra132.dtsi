@@ -4,6 +4,7 @@
 #include <dt-bindings/pinctrl/pinctrl-tegra.h>
 #include <dt-bindings/pinctrl/pinctrl-tegra-xusb.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/power/tegra-powergate.h>
 
 / {
 	compatible = "nvidia,tegra132", "nvidia,tegra124";
@@ -45,6 +46,7 @@
 			 <&tegra_car 72>,
 			 <&tegra_car 74>;
 		reset-names = "pex", "afi", "pcie_x";
+		power-domains = <&pmc TEGRA_POWERGATE_PCIE>;
 		status = "disabled";
 
 		phys = <&padctl TEGRA_XUSB_PADCTL_PCIE>;
@@ -96,6 +98,7 @@
 			compatible = "nvidia,tegra124-dc";
 			reg = <0x0 0x54200000 0x0 0x00040000>;
 			interrupts = <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&pmc TEGRA_POWERGATE_DIS>;
 			clocks = <&tegra_car TEGRA124_CLK_DISP1>,
 				 <&tegra_car TEGRA124_CLK_PLL_P>;
 			clock-names = "dc", "parent";
@@ -111,6 +114,7 @@
 			compatible = "nvidia,tegra124-dc";
 			reg = <0x0 0x54240000 0x0 0x00040000>;
 			interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
+			power-domains = <&pmc TEGRA_POWERGATE_DISB>;
 			clocks = <&tegra_car TEGRA124_CLK_DISP2>,
 				 <&tegra_car TEGRA124_CLK_PLL_P>;
 			clock-names = "dc", "parent";
@@ -145,6 +149,7 @@
 			clock-names = "sor", "parent", "dp", "safe";
 			resets = <&tegra_car 182>;
 			reset-names = "sor";
+			power-domains = <&pmc TEGRA_POWERGATE_SOR>;
 			status = "disabled";
 		};
 
@@ -573,11 +578,13 @@
 		clock-names = "rtc";
 	};
 
-	pmc@0,7000e400 {
+	pmc: pmc@0,7000e400 {
 		compatible = "nvidia,tegra124-pmc";
 		reg = <0x0 0x7000e400 0x0 0x400>;
 		clocks = <&tegra_car TEGRA124_CLK_PCLK>, <&clk32k_in>;
 		clock-names = "pclk", "clk32k_in";
+
+		#power-domain-cells = <1>;
 	};
 
 	fuse@0,7000f800 {
@@ -621,6 +628,7 @@
 			 <&tegra_car 123>,
 			 <&tegra_car 129>;
 		reset-names = "sata", "sata-oob", "sata-cold";
+		power-domains = <&pmc TEGRA_POWERGATE_SATA>;
 		phys = <&padctl TEGRA_XUSB_PADCTL_SATA>;
 		phy-names = "sata-phy";
 		status = "disabled";
