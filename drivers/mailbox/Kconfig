@@ -78,6 +78,14 @@ config STI_MBOX
 	  Mailbox implementation for STMicroelectonics family chips with
 	  hardware for interprocessor communication.
 
+config TEGRA_XUSB_MBOX
+	tristate "NVIDIA Tegra XUSB Mailbox"
+	depends on MFD_TEGRA_XUSB
+	help
+	  Mailbox driver for the XUSB complex found on NVIDIA Tegra124 and
+	  later SoCs.  The XUSB mailbox is used to communicate between the
+	  XUSB microcontroller and the host processor.
+
 config MAILBOX_TEST
 	tristate "Mailbox Test Client"
 	depends on OF
