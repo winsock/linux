@@ -1663,6 +1663,16 @@
 		pinctrl-0 = <&padctl_default>;
 		pinctrl-names = "default";
 
+		phys {
+			pcie-0 {
+				status = "okay";
+			};
+
+			sata-0 {
+				status = "okay";
+			};
+		};
+
 		padctl_default: pinmux {
 			usb3 {
 				nvidia,lanes = "pcie-0", "pcie-1";
