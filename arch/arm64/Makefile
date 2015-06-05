@@ -86,6 +86,9 @@ Image: vmlinux
 Image.%: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
+Image.fit: Image
+	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
+
 zinstall install: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $@
 
