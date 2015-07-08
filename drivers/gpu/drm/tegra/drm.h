@@ -252,17 +252,12 @@ enum drm_dp_aux_mode {
 	DRM_DP_AUX_MODE_AUX,
 };
 
-struct drm_dp_link;
-
 struct drm_dp_aux *drm_dp_aux_find_by_of_node(struct device_node *np);
 enum drm_connector_status drm_dp_aux_detect(struct drm_dp_aux *aux);
 int drm_dp_aux_attach(struct drm_dp_aux *aux, struct tegra_output *output);
 int drm_dp_aux_detach(struct drm_dp_aux *aux);
 int drm_dp_aux_enable(struct drm_dp_aux *aux, enum drm_dp_aux_mode mode);
 int drm_dp_aux_disable(struct drm_dp_aux *aux);
-int drm_dp_aux_prepare(struct drm_dp_aux *aux, u8 encoding);
-int drm_dp_aux_train(struct drm_dp_aux *aux, struct drm_dp_link *link,
-		     u8 pattern);
 
 /* from fb.c */
 struct tegra_bo *tegra_fb_get_plane(struct drm_framebuffer *framebuffer,
