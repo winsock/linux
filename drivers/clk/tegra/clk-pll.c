@@ -442,6 +442,7 @@ static int _get_table_rate(struct clk_hw *hw,
 {
 	struct tegra_clk_pll *pll = to_clk_pll(hw);
 	struct tegra_clk_pll_freq_table *sel;
+	int p;
 
 	for (sel = pll->params->freq_table; sel->input_rate != 0; sel++)
 		if (sel->input_rate == parent_rate &&
@@ -451,11 +452,24 @@ static int _get_table_rate(struct clk_hw *hw,
 	if (sel->input_rate == 0)
 		return -EINVAL;
 
+	if (pll->params->pdiv_tohw) {
+		p = _p_div_to_hw(hw, sel->p);
+		if (p < 0)
+			return p;
+	} else {
+		p = ilog2(sel->p);
+		pr_warn("rate: %lu, parent: %lu\n", rate, parent_rate);
+		pr_warn("input: %lu, output: %lu\n", sel->input_rate, sel->output_rate);
+		pr_warn("cfg: m: %u, n: %u, p: %u\n", sel->m, sel->n, sel->p);
+		WARN(1, "pdiv_tohw table not available for %s: using %u/%u\n",
+		     clk_hw_get_name(hw), p, sel->p);
+	}
+
 	cfg->input_rate = sel->input_rate;
 	cfg->output_rate = sel->output_rate;
 	cfg->m = sel->m;
 	cfg->n = sel->n;
-	cfg->p = sel->p;
+	cfg->p = p;
 	cfg->cpcon = sel->cpcon;
 	cfg->sdm_data = sel->sdm_data;
 
@@ -487,7 +501,7 @@ static int _calc_rate(struct clk_hw *hw, struct tegra_clk_pll_freq_table *cfg,
 		/*
 		 * PLL_P_OUT1 rate is not listed in PLLA table
 		 */
-		cfreq = parent_rate/(parent_rate/1000000);
+		cfreq = parent_rate / (parent_rate / 1000000);
 		break;
 	default:
 		pr_err("%s Unexpected reference rate %lu\n",
@@ -1533,8 +1547,12 @@ static struct clk *_tegra_clk_register_pll(struct tegra_clk_pll *pll,
 	init.num_parents = (parent_name ? 1 : 0);
 
 	/* Default to _calc_rate if unspecified */
-	if (!pll->params->calc_rate)
-		pll->params->calc_rate = _calc_rate;
+	if (!pll->params->calc_rate) {
+		if (pll->params->flags & TEGRA_PLLM)
+			pll->params->calc_rate = _calc_dynamic_ramp_rate;
+		else
+			pll->params->calc_rate = _calc_rate;
+	}
 
 	if (pll->params->set_defaults)
 		pll->params->set_defaults(pll);
