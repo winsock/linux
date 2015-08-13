@@ -56,41 +56,30 @@
  */
 
 /**
- * drm_modeset_lock_all - take all modeset locks
- * @dev: drm device
+ * drm_modeset_lock_all_ctx - take all modeset locks
+ * @dev: DRM device
+ * @ctx: lock acquisition context
  *
  * This function takes all modeset locks, suitable where a more fine-grained
- * scheme isn't (yet) implemented. Locks must be dropped with
- * drm_modeset_unlock_all.
+ * scheme isn't (yet) implemented. Locks must be dropped by calling the
+ * drm_modeset_unlock_all() function.
  */
-void drm_modeset_lock_all(struct drm_device *dev)
+void drm_modeset_lock_all_ctx(struct drm_device *dev,
+			      struct drm_modeset_acquire_ctx *ctx)
 {
 	struct drm_mode_config *config = &dev->mode_config;
-	struct drm_modeset_acquire_ctx *ctx;
 	int ret;
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
-	if (WARN_ON(!ctx))
-		return;
-
 	mutex_lock(&config->mutex);
-
-	drm_modeset_acquire_init(ctx, 0);
 
 retry:
 	ret = drm_modeset_lock(&config->connection_mutex, ctx);
 	if (ret)
 		goto fail;
+
 	ret = drm_modeset_lock_all_crtcs(dev, ctx);
 	if (ret)
 		goto fail;
-
-	WARN_ON(config->acquire_ctx);
-
-	/* now we hold the locks, so now that it is safe, stash the
-	 * ctx for drm_modeset_unlock_all():
-	 */
-	config->acquire_ctx = ctx;
 
 	drm_warn_on_modeset_not_all_locked(dev);
 
@@ -101,16 +90,77 @@ fail:
 		drm_modeset_backoff(ctx);
 		goto retry;
 	}
+}
+EXPORT_SYMBOL(drm_modeset_lock_all_ctx);
 
-	kfree(ctx);
+/**
+ * drm_modeset_unlock_all_ctx - drop all modeset locks
+ * @dev: DRM device
+ * @ctx: lock acquisition context
+ *
+ * This function drops all modeset locks taken by a previous call to the
+ * drm_modeset_lock_all_ctx() function.
+ */
+void drm_modeset_unlock_all_ctx(struct drm_device *dev,
+				struct drm_modeset_acquire_ctx *ctx)
+{
+	struct drm_mode_config *config = &dev->mode_config;
+
+	drm_modeset_drop_locks(ctx);
+	mutex_unlock(&config->mutex);
+}
+EXPORT_SYMBOL(drm_modeset_unlock_all_ctx);
+
+/**
+ * drm_modeset_lock_all - take all modeset locks
+ * @dev: DRM device
+ *
+ * This function takes all modeset locks, suitable where a more fine-grained
+ * scheme isn't (yet) implemented. Locks must be dropped by calling the
+ * drm_modeset_unlock_all() function.
+ *
+ * This function is deprecated. It allocates a lock acquisition context and
+ * stores it in the DRM device's ->mode_config. This facilitate conversion of
+ * existing code because it removes the need to manually deal with the
+ * acquisition context, but it is also brittle because the context is global
+ * and care must be taken not to nest calls. New code should use the
+ * drm_modeset_lock_all_ctx() function and pass in the context explicitly.
+ */
+void drm_modeset_lock_all(struct drm_device *dev)
+{
+	struct drm_mode_config *config = &dev->mode_config;
+	struct drm_modeset_acquire_ctx *ctx;
+
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (WARN_ON(!ctx))
+		return;
+
+	drm_modeset_acquire_init(ctx, 0);
+	drm_modeset_lock_all_ctx(dev, ctx);
+
+	WARN_ON(config->acquire_ctx);
+
+	/*
+	 * We hold the locks now, so it is safe to stash the acquisition
+	 * context for drm_modeset_unlock_all().
+	 */
+	config->acquire_ctx = ctx;
 }
 EXPORT_SYMBOL(drm_modeset_lock_all);
 
 /**
  * drm_modeset_unlock_all - drop all modeset locks
- * @dev: device
+ * @dev: DRM device
  *
- * This function drop all modeset locks taken by drm_modeset_lock_all.
+ * This function drops all modeset locks taken by a previous call to the
+ * drm_modeset_lock_all() function.
+ *
+ * This function is deprecated. It uses the lock acquisition context stored
+ * in the DRM device's ->mode_config. This facilitates conversion of existing
+ * code because it removes the need to manually deal with the acquisition
+ * context, but it is also brittle because the context is global and care must
+ * be taken not to nest calls. New code should use the
+ * drm_modeset_unlock_all_ctx() function and pass in the context explicitly.
  */
 void drm_modeset_unlock_all(struct drm_device *dev)
 {
@@ -121,12 +171,9 @@ void drm_modeset_unlock_all(struct drm_device *dev)
 		return;
 
 	config->acquire_ctx = NULL;
-	drm_modeset_drop_locks(ctx);
+	drm_modeset_unlock_all_ctx(dev, ctx);
 	drm_modeset_acquire_fini(ctx);
-
 	kfree(ctx);
-
-	mutex_unlock(&dev->mode_config.mutex);
 }
 EXPORT_SYMBOL(drm_modeset_unlock_all);
 
