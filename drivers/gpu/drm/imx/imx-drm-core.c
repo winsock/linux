@@ -175,7 +175,7 @@ static void imx_drm_disable_vblank(struct drm_device *drm, unsigned int pipe)
 static void imx_drm_driver_preclose(struct drm_device *drm,
 		struct drm_file *file)
 {
-	int i;
+	unsigned int i;
 
 	if (!file->is_master)
 		return;
