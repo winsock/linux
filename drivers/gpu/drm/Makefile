@@ -26,6 +26,7 @@ drm-y += $(drm-m)
 drm_kms_helper-y := drm_crtc_helper.o drm_dp_helper.o drm_probe_helper.o \
 		drm_plane_helper.o drm_dp_mst_topology.o drm_atomic_helper.o
 drm_kms_helper-$(CONFIG_DRM_HDCP) += drm_hdcp_helper.o
+drm_kms_helper-$(CONFIG_DRM_SCDC) += drm_scdc_helper.o
 drm_kms_helper-$(CONFIG_DRM_LOAD_EDID_FIRMWARE) += drm_edid_load.o
 drm_kms_helper-$(CONFIG_DRM_FBDEV_EMULATION) += drm_fb_helper.o
 drm_kms_helper-$(CONFIG_DRM_KMS_CMA_HELPER) += drm_fb_cma_helper.o
