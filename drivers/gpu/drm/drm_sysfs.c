@@ -254,24 +254,24 @@ static ssize_t edid_show(struct file *filp, struct kobject *kobj,
 {
 	struct device *connector_dev = container_of(kobj, struct device, kobj);
 	struct drm_connector *connector = to_drm_connector(connector_dev);
-	unsigned char *edid;
 	size_t size;
+	void *edid;
 
-	if (!connector->edid_blob_ptr)
-		return 0;
-
-	edid = connector->edid_blob_ptr->data;
-	size = connector->edid_blob_ptr->length;
+	edid = drm_mode_connector_get_edid(connector, &size);
 	if (!edid)
 		return 0;
 
-	if (off >= size)
-		return 0;
+	if (off >= size) {
+		count = 0;
+		goto out;
+	}
 
 	if (off + count > size)
 		count = size - off;
 	memcpy(buf, edid + off, count);
 
+out:
+	drm_mode_connector_put_edid(connector);
 	return count;
 }
 

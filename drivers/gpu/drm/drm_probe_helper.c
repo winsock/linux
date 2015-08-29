@@ -205,10 +205,12 @@ static int drm_helper_probe_single_connector_modes_merge_bits(struct drm_connect
 #endif
 	{
 		if (connector->override_edid) {
-			struct edid *edid = (struct edid *) connector->edid_blob_ptr->data;
+			struct edid *edid = drm_mode_connector_get_edid(connector, NULL);
 
 			count = drm_add_edid_modes(connector, edid);
 			drm_edid_to_eld(connector, edid);
+
+			drm_mode_connector_put_edid(connector);
 		} else
 			count = (*connector_funcs->get_modes)(connector);
 	}
