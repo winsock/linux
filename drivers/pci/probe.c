@@ -752,7 +752,13 @@ add_dev:
 	ret = device_register(&child->dev);
 	WARN_ON(ret < 0);
 
-	pcibios_add_bus(child);
+	if (child->ops->add_bus) {
+		ret = child->ops->add_bus(child);
+		if (ret < 0)
+			dev_err(&child->dev, "failed to add bus: %d\n", ret);
+	} else {
+		pcibios_add_bus(child);
+	}
 
 	/* Create legacy_io and legacy_mem files for this bus */
 	pci_create_legacy_files(child);
