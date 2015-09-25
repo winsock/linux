@@ -2132,6 +2132,11 @@ static struct platform_driver mpsc_driver = {
 	},
 };
 
+static struct platform_driver * const drivers[] = {
+	&mpsc_shared_driver,
+	&mpsc_driver,
+};
+
 static int __init mpsc_drv_init(void)
 {
 	int	rc;
@@ -2143,16 +2148,9 @@ static int __init mpsc_drv_init(void)
 
 	rc = uart_register_driver(&mpsc_reg);
 	if (!rc) {
-		rc = platform_driver_register(&mpsc_shared_driver);
-		if (!rc) {
-			rc = platform_driver_register(&mpsc_driver);
-			if (rc) {
-				platform_driver_unregister(&mpsc_shared_driver);
-				uart_unregister_driver(&mpsc_reg);
-			}
-		} else {
+		rc = platform_register_drivers(drivers, ARRAY_SIZE(drivers));
+		if (rc)
 			uart_unregister_driver(&mpsc_reg);
-		}
 	}
 
 	return rc;
@@ -2160,8 +2158,7 @@ static int __init mpsc_drv_init(void)
 
 static void __exit mpsc_drv_exit(void)
 {
-	platform_driver_unregister(&mpsc_driver);
-	platform_driver_unregister(&mpsc_shared_driver);
+	platform_unregister_drivers(drivers, ARRAY_SIZE(drivers));
 	uart_unregister_driver(&mpsc_reg);
 	memset(mpsc_ports, 0, sizeof(mpsc_ports));
 	memset(&mpsc_shared_regs, 0, sizeof(mpsc_shared_regs));
