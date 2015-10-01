@@ -1539,6 +1539,8 @@ int drm_dp_link_train(struct drm_dp_link *link)
 {
 	int err;
 
+	drm_dp_link_train_init(&link->train);
+
 	if (link->capabilities & DP_LINK_CAP_FAST_TRAINING) {
 		if (drm_dp_link_train_valid(&link->train)) {
 			err = drm_dp_link_train_fast(link);
