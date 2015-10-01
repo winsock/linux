@@ -786,6 +786,9 @@ struct tegra_clk_sor {
 	unsigned int source;
 };
 
+#define DIV71_MASK 0xffU
+#define DIV71_MUL 2
+
 static inline struct tegra_clk_sor *to_tegra_clk_sor(struct clk_hw *hw)
 {
 	return container_of(hw, struct tegra_clk_sor, hw);
@@ -822,6 +825,43 @@ static void tegra_clk_sor_disable(struct clk_hw *hw)
 	u32 mask = 1 << (sor->num % 32);
 
 	writel(mask, sor->base + sor->regs->enb_clr_reg);
+}
+
+static unsigned long tegra_clk_sor_recalc_rate(struct clk_hw *hw,
+					       unsigned long parent_rate)
+{
+	struct tegra_clk_sor *sor= to_tegra_clk_sor(hw);
+	unsigned int div, mul = DIV71_MUL;
+	u32 value;
+	u64 rate;
+
+	value = readl(sor->base + sor->source);
+	div = (value & DIV71_MASK) + mul;
+
+	rate = parent_rate * mul;
+	rate += div - 1;
+	do_div(rate, div);
+
+	return rate;
+}
+
+static long tegra_clk_sor_round_rate(struct clk_hw *hw, unsigned long rate,
+				     unsigned long *parent_rate)
+{
+	unsigned int mul = DIV71_MUL, div;
+	s64 divider;
+
+	if (!rate)
+		return *parent_rate;
+
+	divider = *parent_rate * mul;
+	divider += rate - 1;
+	do_div(divider, rate);
+	div = divider - mul;
+
+	div = clamp(div, 0U, DIV71_MASK);
+
+	return DIV_ROUND_UP(*parent_rate * mul, div + mul);
 }
 
 static u8 tegra_clk_sor_get_parent(struct clk_hw *hw)
@@ -861,12 +901,38 @@ static int tegra_clk_sor_set_parent(struct clk_hw *hw, u8 index)
 	return 0;
 }
 
+int tegra_clk_sor_set_rate(struct clk_hw *hw, unsigned long rate,
+			   unsigned long parent_rate)
+{
+	struct tegra_clk_sor *sor = to_tegra_clk_sor(hw);
+	unsigned int mul = DIV71_MUL;
+	u32 value;
+	s64 div;
+
+	div = parent_rate * mul;
+	div += rate - 1;
+	do_div(div, rate);
+	div -= mul;
+
+	div = clamp_t(s64, div, 0, DIV71_MASK);
+
+	value = readl(sor->base + sor->source);
+	value &= ~DIV71_MASK;
+	value |= div;
+	writel(value, sor->base + sor->source);
+
+	return 0;
+}
+
 static const struct clk_ops tegra_clk_sor_ops = {
 	.is_enabled = tegra_clk_sor_is_enabled,
 	.enable = tegra_clk_sor_enable,
 	.disable = tegra_clk_sor_disable,
+	.recalc_rate = tegra_clk_sor_recalc_rate,
+	.round_rate = tegra_clk_sor_round_rate,
 	.get_parent = tegra_clk_sor_get_parent,
 	.set_parent = tegra_clk_sor_set_parent,
+	.set_rate = tegra_clk_sor_set_rate,
 };
 
 struct clk *tegra_clk_register_sor(const char *name, void __iomem *base,

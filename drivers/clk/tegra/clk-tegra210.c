@@ -2457,13 +2457,13 @@ static void tegra210_utmi_param_configure(void __iomem *clk_base)
 }
 
 static const char *tegra_clk_sor1_parents[] = {
-	"sor_safe", "pll_dp", "pll_p_out0", "pll_d_out0", "pll_d2_out0",
+	"sor_safe", "sor1_brick", "pll_p_out0", "pll_d_out0", "pll_d2_out0",
 	"clk_m"
 };
 
 static const struct tegra_clk_parent tegra_clk_sor1_mux[] = {
 	{ "sor_safe",    0x0000c000, 0x00000000 },
-	{ "sor1_brick",  0x0000c000, 0x00004000 },
+	{ "sor1_brick",  0x0000c000, 0xa0004000 },
 	{ "pll_p_out0",  0xe000c000, 0x00008000 },
 	{ "pll_d_out0",  0xe000c000, 0x40008000 },
 	{ "pll_d2_out0", 0xe000c000, 0xa0008000 },
