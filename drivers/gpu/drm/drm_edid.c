@@ -3237,26 +3237,26 @@ out:
 	return modes;
 }
 
-static int
+static unsigned int
 cea_db_payload_len(const u8 *db)
 {
 	return db[0] & 0x1f;
 }
 
-static int
+static unsigned int
 cea_db_tag(const u8 *db)
 {
 	return db[0] >> 5;
 }
 
-static int
+static unsigned int
 cea_revision(const u8 *cea)
 {
 	return cea[1];
 }
 
 static int
-cea_db_offsets(const u8 *cea, int *start, int *end)
+cea_db_offsets(const u8 *cea, unsigned int *start, unsigned int *end)
 {
 	/* Data block offset in CEA extension block */
 	*start = 4;
@@ -3306,11 +3306,11 @@ add_cea_modes(struct drm_connector *connector, struct edid *edid)
 {
 	const u8 *cea = drm_find_cea_extension(edid);
 	const u8 *db, *hdmi = NULL, *video = NULL;
-	u8 dbl, hdmi_len, video_len = 0;
+	u8 hdmi_len, video_len = 0;
 	int modes = 0;
 
 	if (cea && cea_revision(cea) >= 3) {
-		int i, start, end;
+		unsigned int i, start, end, dbl;
 
 		if (cea_db_offsets(cea, &start, &end))
 			return 0;
@@ -3384,7 +3384,7 @@ static void fixup_detailed_cea_mode_clock(struct drm_display_mode *mode)
 static void
 parse_hdmi_vsdb(struct drm_connector *connector, const u8 *db)
 {
-	u8 len = cea_db_payload_len(db);
+	unsigned int len = cea_db_payload_len(db);
 
 	if (len >= 6) {
 		connector->eld[5] |= (db[6] >> 7) << 1;  /* Supports_AI */
@@ -3444,7 +3444,6 @@ void drm_edid_to_eld(struct drm_connector *connector, struct edid *edid)
 	u8 *db;
 	int sad_count = 0;
 	int mnl;
-	int dbl;
 
 	memset(eld, 0, sizeof(connector->eld));
 
@@ -3472,7 +3471,7 @@ void drm_edid_to_eld(struct drm_connector *connector, struct edid *edid)
 	eld[19] = edid->prod_code[1];
 
 	if (cea_revision(cea) >= 3) {
-		int i, start, end;
+		unsigned int i, start, end, dbl;
 
 		if (cea_db_offsets(cea, &start, &end)) {
 			start = 0;
@@ -3528,8 +3527,7 @@ EXPORT_SYMBOL(drm_edid_to_eld);
  */
 int drm_edid_to_sad(struct edid *edid, struct cea_sad **sads)
 {
-	int count = 0;
-	int i, start, end, dbl;
+	unsigned int i, start, end, dbl, count = 0;
 	u8 *cea;
 
 	cea = drm_find_cea_extension(edid);
@@ -3552,7 +3550,8 @@ int drm_edid_to_sad(struct edid *edid, struct cea_sad **sads)
 		u8 *db = &cea[i];
 
 		if (cea_db_tag(db) == AUDIO_BLOCK) {
-			int j;
+			unsigned int j;
+
 			dbl = cea_db_payload_len(db);
 
 			count = dbl / 3; /* SAD is 3B */
@@ -3589,8 +3588,7 @@ EXPORT_SYMBOL(drm_edid_to_sad);
  */
 int drm_edid_to_speaker_allocation(struct edid *edid, u8 **sadb)
 {
-	int count = 0;
-	int i, start, end, dbl;
+	unsigned int i, start, end, dbl, count = 0;
 	const u8 *cea;
 
 	cea = drm_find_cea_extension(edid);
@@ -3708,8 +3706,7 @@ EXPORT_SYMBOL(drm_select_eld);
 bool drm_detect_hdmi_monitor(struct edid *edid)
 {
 	u8 *edid_ext;
-	int i;
-	int start_offset, end_offset;
+	unsigned int start_offset, end_offset, i;
 
 	edid_ext = drm_find_cea_extension(edid);
 	if (!edid_ext)
@@ -3780,9 +3777,8 @@ EXPORT_SYMBOL(drm_detect_hdmi_scdc);
 bool drm_detect_monitor_audio(struct edid *edid)
 {
 	u8 *edid_ext;
-	int i, j;
 	bool has_audio = false;
-	int start_offset, end_offset;
+	unsigned int start_offset, end_offset, i, j;
 
 	edid_ext = drm_find_cea_extension(edid);
 	if (!edid_ext)
@@ -3825,7 +3821,7 @@ EXPORT_SYMBOL(drm_detect_monitor_audio);
 bool drm_rgb_quant_range_selectable(struct edid *edid)
 {
 	u8 *edid_ext;
-	int i, start, end;
+	unsigned int i, start, end;
 
 	edid_ext = drm_find_cea_extension(edid);
 	if (!edid_ext)
@@ -3862,8 +3858,7 @@ static bool drm_assign_hdmi_deep_color_info(struct edid *edid,
                                             struct drm_connector *connector)
 {
 	u8 *edid_ext, *hdmi;
-	int i;
-	int start_offset, end_offset;
+	unsigned int start_offset, end_offset, i;
 	unsigned int dc_bpc = 0;
 
 	edid_ext = drm_find_cea_extension(edid);
