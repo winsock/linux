@@ -897,6 +897,12 @@
 		interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		clocks = <&tegra_car TEGRA210_CLK_QSPI>;
+		clock-names = "qspi";
+		resets = <&tegra_car 211>;
+		reset-names = "qspi";
+		dmas = <&apbdma 5>, <&apbdma 5>;
+		dma-names = "rx", "tx";
 		status = "disabled";
 	};
 
