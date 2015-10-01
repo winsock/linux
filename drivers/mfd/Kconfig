@@ -1508,6 +1508,7 @@ config MFD_TEGRA_XUSB
 	tristate "NVIDIA Tegra XUSB"
 	depends on ARCH_TEGRA
 	select MFD_CORE
+	select REGMAP_MMIO
 	help
 	  Support for the XUSB complex found on NVIDIA Tegra124 and later SoCs.
 
