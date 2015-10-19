@@ -458,11 +458,6 @@ static int _get_table_rate(struct clk_hw *hw,
 			return p;
 	} else {
 		p = ilog2(sel->p);
-		pr_warn("rate: %lu, parent: %lu\n", rate, parent_rate);
-		pr_warn("input: %lu, output: %lu\n", sel->input_rate, sel->output_rate);
-		pr_warn("cfg: m: %u, n: %u, p: %u\n", sel->m, sel->n, sel->p);
-		WARN(1, "pdiv_tohw table not available for %s: using %u/%u\n",
-		     clk_hw_get_name(hw), p, sel->p);
 	}
 
 	cfg->input_rate = sel->input_rate;
