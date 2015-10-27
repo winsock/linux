@@ -63,4 +63,15 @@ static inline int arch_is_kernel_data(unsigned long addr)
 }
 #endif
 
+static inline bool section_contains(void *virt, size_t size, void *begin,
+				    void *end)
+{
+	return virt >= begin && virt + size <= end;
+}
+
+static inline bool init_section_contains(void *virt, size_t size)
+{
+	return section_contains(virt, size, __init_begin, __init_end);
+}
+
 #endif /* _ASM_GENERIC_SECTIONS_H_ */
