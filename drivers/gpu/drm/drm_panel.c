@@ -200,7 +200,6 @@ EXPORT_SYMBOL(drm_panel_detach);
 struct drm_panel *of_drm_find_panel(struct device_node *np)
 {
 	struct registry_record *record;
-	struct drm_panel *panel;
 
 	mutex_lock(&panel_lock);
 

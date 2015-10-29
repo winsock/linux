@@ -2023,6 +2023,8 @@ static int _regulator_do_enable(struct regulator_dev *rdev)
 {
 	int ret, delay;
 
+	rdev_dbg(rdev, "> %s(rdev=%p)\n", __func__, rdev);
+
 	/* Query before enabling in case configuration dependent.  */
 	ret = _regulator_get_enable_time(rdev);
 	if (ret >= 0) {
@@ -2083,6 +2085,7 @@ static int _regulator_do_enable(struct regulator_dev *rdev)
 
 	trace_regulator_enable_complete(rdev_get_name(rdev));
 
+	rdev_dbg(rdev, "< %s()\n", __func__);
 	return 0;
 }
 
@@ -2161,6 +2164,8 @@ static int _regulator_do_disable(struct regulator_dev *rdev)
 {
 	int ret;
 
+	rdev_dbg(rdev, "> %s(rdev=%p)\n", __func__, rdev);
+
 	trace_regulator_disable(rdev_get_name(rdev));
 
 	if (rdev->ena_pin) {
@@ -2185,6 +2190,7 @@ static int _regulator_do_disable(struct regulator_dev *rdev)
 
 	trace_regulator_disable_complete(rdev_get_name(rdev));
 
+	rdev_dbg(rdev, "< %s()\n", __func__);
 	return 0;
 }
 

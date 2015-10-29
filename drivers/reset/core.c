@@ -164,8 +164,10 @@ struct reset_control *of_reset_control_get(struct device_node *node,
 						 "reset-names", id);
 	ret = of_parse_phandle_with_args(node, "resets", "#reset-cells",
 					 index, &args);
-	if (ret)
+	if (ret) {
+		pr_info("failed to parse phandle: %d\n", ret);
 		return ERR_PTR(ret);
+	}
 
 	mutex_lock(&reset_controller_list_mutex);
 	rcdev = NULL;

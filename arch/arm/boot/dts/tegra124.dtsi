@@ -55,9 +55,6 @@
 */
 		status = "disabled";
 
-		phys = <&padctl TEGRA_XUSB_PADCTL_PCIE>;
-		phy-names = "pcie";
-
 		pci@1,0 {
 			device_type = "pci";
 			assigned-addresses = <0x82000800 0 0x01000000 0 0x1000>;
@@ -658,8 +655,6 @@
 /*
 		power-domains = <&pmc TEGRA_POWERGATE_SATA>;
 */
-		phys = <&padctl TEGRA_XUSB_PADCTL_SATA>;
-		phy-names = "sata-phy";
 		status = "disabled";
 	};
 
@@ -731,25 +726,89 @@
 		mboxes = <&xusb_mbox>;
 		mbox-names = "xusb";
 
-		#phy-cells = <1>;
-
-		phys {
-			pcie-0 {
+		pads {
+			utmi {
 				status = "disabled";
+
+				utmi-0 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+
+				utmi-1 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+
+				utmi-2 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
 			};
 
-			sata-0 {
+			ulpi {
 				status = "disabled";
+
+				ulpi-0 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
 			};
 
-			usb3-0 {
+			hsic {
 				status = "disabled";
+
+				hsic-0 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+
+				hsic-1 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
 			};
 
-			usb3-1 {
+			pcie {
 				status = "disabled";
+
+				pcie-0 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+
+				pcie-1 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+
+				pcie-2 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+
+				pcie-3 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+
+				pcie-4 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
 			};
 
+			sata {
+				status = "disabled";
+
+				sata-0 {
+					status = "disabled";
+					#phy-cells = <0>;
+				};
+			};
+		};
+
+		ports {
 			utmi-0 {
 				status = "disabled";
 			};
@@ -759,6 +818,26 @@
 			};
 
 			utmi-2 {
+				status = "disabled";
+			};
+
+			ulpi-0 {
+				status = "disabled";
+			};
+
+			hsic-0 {
+				status = "disabled";
+			};
+
+			hsic-1 {
+				status = "disabled";
+			};
+
+			usb3-0 {
+				status = "disabled";
+			};
+
+			usb3-1 {
 				status = "disabled";
 			};
 		};

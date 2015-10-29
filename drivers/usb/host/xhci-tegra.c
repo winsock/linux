@@ -135,6 +135,7 @@ struct tegra_xhci_soc_data {
 	unsigned int num_supplies;
 	const struct tegra_xhci_phy_type *phy_types;
 	unsigned int num_types;
+	bool scale_ss_clock;
 };
 
 struct tegra_xhci_hcd {
@@ -170,6 +171,7 @@ struct tegra_xhci_hcd {
 	struct tegra_xusb_mbox_msg mbox_req;
 	struct mbox_client mbox_client;
 	struct mbox_chan *mbox_chan;
+	struct completion mbox_ack;
 
 	/* Firmware loading related */
 	void *fw_data;
@@ -374,9 +376,11 @@ static int tegra_xhci_set_ss_clk(struct tegra_xhci_hcd *tegra,
 		ret = clk_set_rate(clk, old_parent_rate / div);
 		if (ret)
 			return ret;
+
 		ret = clk_set_parent(clk, tegra->pll_u_480m);
 		if (ret)
 			return ret;
+
 		/*
 		 * The rate should already be correct, but set it again just
 		 * to be sure.
@@ -385,15 +389,18 @@ static int tegra_xhci_set_ss_clk(struct tegra_xhci_hcd *tegra,
 		if (ret)
 			return ret;
 		break;
+
 	case TEGRA_XHCI_SS_CLK_LOW_SPEED:
 		/* Reparent to CLK_M */
 		ret = clk_set_parent(clk, tegra->clk_m);
 		if (ret)
 			return ret;
+
 		ret = clk_set_rate(clk, rate);
 		if (ret)
 			return ret;
 		break;
+
 	default:
 		dev_err(tegra->dev, "Invalid SS rate: %lu\n", rate);
 		return -EINVAL;
@@ -414,24 +421,33 @@ static int tegra_xhci_clk_enable(struct tegra_xhci_hcd *tegra)
 	ret = clk_prepare_enable(tegra->pll_e);
 	if (ret < 0)
 		return ret;
+
 	ret = clk_prepare_enable(tegra->host_clk);
 	if (ret < 0)
 		goto disable_plle;
+
 	ret = clk_prepare_enable(tegra->ss_clk);
 	if (ret < 0)
 		goto disable_host;
+
 	ret = clk_prepare_enable(tegra->falc_clk);
 	if (ret < 0)
 		goto disable_ss;
+
 	ret = clk_prepare_enable(tegra->fs_src_clk);
 	if (ret < 0)
 		goto disable_falc;
+
 	ret = clk_prepare_enable(tegra->hs_src_clk);
 	if (ret < 0)
 		goto disable_fs_src;
-	ret = tegra_xhci_set_ss_clk(tegra, TEGRA_XHCI_SS_CLK_HIGH_SPEED);
-	if (ret < 0)
-		goto disable_hs_src;
+
+	if (tegra->soc->scale_ss_clock) {
+		ret = tegra_xhci_set_ss_clk(tegra,
+					    TEGRA_XHCI_SS_CLK_HIGH_SPEED);
+		if (ret < 0)
+			goto disable_hs_src;
+	}
 
 	return 0;
 
@@ -469,6 +485,7 @@ static int tegra_xhci_phy_enable(struct tegra_xhci_hcd *tegra)
 		ret = phy_init(tegra->phys[i]);
 		if (ret)
 			goto disable_phy;
+
 		ret = phy_power_on(tegra->phys[i]);
 		if (ret) {
 			phy_exit(tegra->phys[i]);
@@ -477,11 +494,13 @@ static int tegra_xhci_phy_enable(struct tegra_xhci_hcd *tegra)
 	}
 
 	return 0;
+
 disable_phy:
-	for (; i > 0; i--) {
-		phy_power_off(tegra->phys[i - 1]);
-		phy_exit(tegra->phys[i - 1]);
+	while (i--) {
+		phy_power_off(tegra->phys[i]);
+		phy_exit(tegra->phys[i]);
 	}
+
 	return ret;
 }
 
@@ -504,6 +523,7 @@ static bool is_host_mbox_message(u32 cmd)
 	case MBOX_CMD_DEC_FALC_CLOCK:
 	case MBOX_CMD_SET_BW:
 		return true;
+
 	default:
 		return false;
 	}
@@ -520,13 +540,20 @@ static void tegra_xhci_mbox_work(struct work_struct *work)
 	switch (msg->cmd) {
 	case MBOX_CMD_INC_SSPI_CLOCK:
 	case MBOX_CMD_DEC_SSPI_CLOCK:
-		ret = tegra_xhci_set_ss_clk(tegra, msg->data * 1000);
-		resp.data = clk_get_rate(tegra->ss_src_clk) / 1000;
+		if (tegra->soc->scale_ss_clock) {
+			ret = tegra_xhci_set_ss_clk(tegra, msg->data * 1000);
+			resp.data = clk_get_rate(tegra->ss_src_clk) / 1000;
+		} else {
+			resp.data = msg->data;
+			ret = 0;
+		}
+
 		if (ret)
 			resp.cmd = MBOX_CMD_NAK;
 		else
 			resp.cmd = MBOX_CMD_ACK;
 		break;
+
 	case MBOX_CMD_INC_FALC_CLOCK:
 	case MBOX_CMD_DEC_FALC_CLOCK:
 		resp.data = clk_get_rate(tegra->falc_clk) / 1000;
@@ -535,6 +562,7 @@ static void tegra_xhci_mbox_work(struct work_struct *work)
 		else
 			resp.cmd = MBOX_CMD_ACK;
 		break;
+
 	case MBOX_CMD_SET_BW:
 		/*
 		 * TODO: Request bandwidth once EMC scaling is supported.
@@ -558,6 +586,8 @@ static void tegra_xhci_mbox_rx(struct mbox_client *cl, void *data)
 	if (is_host_mbox_message(msg->cmd)) {
 		tegra->mbox_req = *msg;
 		schedule_work(&tegra->mbox_req_work);
+	} else if (msg->cmd == MBOX_CMD_ACK || msg->cmd == MBOX_CMD_NAK) {
+		complete(&tegra->mbox_ack);
 	}
 }
 
@@ -594,11 +624,39 @@ static const struct tegra_xhci_soc_data tegra124_soc_data = {
 	.num_supplies = ARRAY_SIZE(tegra124_supply_names),
 	.phy_types = tegra124_phy_types,
 	.num_types = ARRAY_SIZE(tegra124_phy_types),
+	.scale_ss_clock = true,
 };
 MODULE_FIRMWARE("nvidia/tegra124/xusb.bin");
 
+static const char * const tegra210_supply_names[] = {
+	"dvddio-pex",
+	"hvddio-pex",
+	"avdd-usb",
+	"avdd-pll-utmip",
+	"avdd-pll-uerefe",
+	"dvdd-usb-ss-pll",
+	"hvdd-usb-ss-pll-e",
+};
+
+static const struct tegra_xhci_phy_type tegra210_phy_types[] = {
+	{ .name = "usb3", .num = 4, },
+	{ .name = "utmi", .num = 4, },
+	{ .name = "hsic", .num = 1, },
+};
+
+static const struct tegra_xhci_soc_data tegra210_soc_data = {
+	.firmware_file = "nvidia/tegra210/xusb.bin",
+	.supply_names = tegra210_supply_names,
+	.num_supplies = ARRAY_SIZE(tegra210_supply_names),
+	.phy_types = tegra210_phy_types,
+	.num_types = ARRAY_SIZE(tegra210_phy_types),
+	.scale_ss_clock = false,
+};
+MODULE_FIRMWARE("nvidia/tegra210/xusb.bin");
+
 static const struct of_device_id tegra_xhci_of_match[] = {
 	{ .compatible = "nvidia,tegra124-xhci", .data = &tegra124_soc_data },
+	{ .compatible = "nvidia,tegra210-xhci", .data = &tegra210_soc_data },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, tegra_xhci_of_match);
@@ -618,11 +676,13 @@ static void tegra_xhci_probe_finish(const struct firmware *fw, void *context)
 	/* Load Falcon controller with its firmware. */
 	cfg_tbl = (struct tegra_xhci_fw_cfgtbl *)fw->data;
 	tegra->fw_size = le32_to_cpu(cfg_tbl->fwimg_len);
+
 	tegra->fw_data = dma_alloc_coherent(dev, tegra->fw_size,
 					    &tegra->fw_dma_addr,
 					    GFP_KERNEL);
 	if (!tegra->fw_data)
 		goto put_usb2_hcd;
+
 	memcpy(tegra->fw_data, fw->data, tegra->fw_size);
 
 	ret = tegra_xhci_load_firmware(tegra);
@@ -632,6 +692,7 @@ static void tegra_xhci_probe_finish(const struct firmware *fw, void *context)
 	ret = usb_add_hcd(tegra->hcd, tegra->irq, IRQF_SHARED);
 	if (ret < 0)
 		goto put_usb2_hcd;
+
 	device_wakeup_enable(tegra->hcd->self.controller);
 
 	/*
@@ -640,6 +701,7 @@ static void tegra_xhci_probe_finish(const struct firmware *fw, void *context)
 	tegra->hcd = dev_get_drvdata(dev);
 	dev_set_drvdata(dev, tegra);
 	xhci = hcd_to_xhci(tegra->hcd);
+
 	xhci->shared_hcd = usb_create_shared_hcd(&tegra_xhci_hc_driver,
 						 dev, dev_name(dev),
 						 tegra->hcd);
@@ -653,12 +715,14 @@ static void tegra_xhci_probe_finish(const struct firmware *fw, void *context)
 	/* Enable firmware messages from controller. */
 	msg.cmd = MBOX_CMD_MSG_ENABLED;
 	msg.data = 0;
+
 	ret = mbox_send_message(tegra->mbox_chan, &msg);
 	if (ret < 0)
 		goto dealloc_usb3_hcd;
 
 	tegra->fw_loaded = true;
 	release_firmware(fw);
+
 	return;
 
 	/* Free up as much as we can and wait to be unbound. */
@@ -690,6 +754,7 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 	tegra = devm_kzalloc(&pdev->dev, sizeof(*tegra), GFP_KERNEL);
 	if (!tegra)
 		return -ENOMEM;
+
 	tegra->dev = &pdev->dev;
 	platform_set_drvdata(pdev, tegra);
 
@@ -700,6 +765,7 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 			     dev_name(&pdev->dev));
 	if (!hcd)
 		return -ENOMEM;
+
 	tegra->hcd = hcd;
 
 	tegra->fpci_regs = dev_get_drvdata(pdev->dev.parent);
@@ -710,6 +776,7 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 		ret = PTR_ERR(hcd->regs);
 		goto put_hcd;
 	}
+
 	hcd->rsrc_start = res->start;
 	hcd->rsrc_len = resource_size(res);
 
@@ -731,6 +798,7 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 		ret = PTR_ERR(tegra->host_rst);
 		goto put_hcd;
 	}
+
 	tegra->ss_rst = devm_reset_control_get(&pdev->dev, "xusb_ss");
 	if (IS_ERR(tegra->ss_rst)) {
 		ret = PTR_ERR(tegra->ss_rst);
@@ -742,46 +810,55 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 		ret = PTR_ERR(tegra->host_clk);
 		goto put_hcd;
 	}
+
 	tegra->falc_clk = devm_clk_get(&pdev->dev, "xusb_falcon_src");
 	if (IS_ERR(tegra->falc_clk)) {
 		ret = PTR_ERR(tegra->falc_clk);
 		goto put_hcd;
 	}
+
 	tegra->ss_clk = devm_clk_get(&pdev->dev, "xusb_ss");
 	if (IS_ERR(tegra->ss_clk)) {
 		ret = PTR_ERR(tegra->ss_clk);
 		goto put_hcd;
 	}
+
 	tegra->ss_src_clk = devm_clk_get(&pdev->dev, "xusb_ss_src");
 	if (IS_ERR(tegra->ss_src_clk)) {
 		ret = PTR_ERR(tegra->ss_src_clk);
 		goto put_hcd;
 	}
+
 	tegra->hs_src_clk = devm_clk_get(&pdev->dev, "xusb_hs_src");
 	if (IS_ERR(tegra->hs_src_clk)) {
 		ret = PTR_ERR(tegra->hs_src_clk);
 		goto put_hcd;
 	}
+
 	tegra->fs_src_clk = devm_clk_get(&pdev->dev, "xusb_fs_src");
 	if (IS_ERR(tegra->fs_src_clk)) {
 		ret = PTR_ERR(tegra->fs_src_clk);
 		goto put_hcd;
 	}
+
 	tegra->pll_u_480m = devm_clk_get(&pdev->dev, "pll_u_480m");
 	if (IS_ERR(tegra->pll_u_480m)) {
 		ret = PTR_ERR(tegra->pll_u_480m);
 		goto put_hcd;
 	}
+
 	tegra->clk_m = devm_clk_get(&pdev->dev, "clk_m");
 	if (IS_ERR(tegra->clk_m)) {
 		ret = PTR_ERR(tegra->clk_m);
 		goto put_hcd;
 	}
+
 	tegra->pll_e = devm_clk_get(&pdev->dev, "pll_e");
 	if (IS_ERR(tegra->pll_e)) {
 		ret = PTR_ERR(tegra->pll_e);
 		goto put_hcd;
 	}
+
 	ret = tegra_xhci_clk_enable(tegra);
 	if (ret)
 		goto put_hcd;
@@ -792,21 +869,26 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto put_hcd;
 	}
+
 	for (i = 0; i < tegra->soc->num_supplies; i++)
 		tegra->supplies[i].supply = tegra->soc->supply_names[i];
+
 	ret = devm_regulator_bulk_get(&pdev->dev, tegra->soc->num_supplies,
 				      tegra->supplies);
 	if (ret)
 		goto disable_clk;
+
 	ret = regulator_bulk_enable(tegra->soc->num_supplies, tegra->supplies);
 	if (ret)
 		goto disable_clk;
 
 	INIT_WORK(&tegra->mbox_req_work, tegra_xhci_mbox_work);
+	init_completion(&tegra->mbox_ack);
 	tegra->mbox_client.dev = &pdev->dev;
 	tegra->mbox_client.tx_block = true;
 	tegra->mbox_client.tx_tout = 0;
 	tegra->mbox_client.rx_callback = tegra_xhci_mbox_rx;
+
 	tegra->mbox_chan = mbox_request_channel(&tegra->mbox_client, 0);
 	if (IS_ERR(tegra->mbox_chan)) {
 		ret = PTR_ERR(tegra->mbox_chan);
@@ -815,23 +897,27 @@ static int tegra_xhci_probe(struct platform_device *pdev)
 
 	for (i = 0; i < tegra->soc->num_types; i++)
 		tegra->num_phys += tegra->soc->phy_types[i].num;
+
 	tegra->phys = devm_kcalloc(&pdev->dev, tegra->num_phys,
 				   sizeof(*tegra->phys), GFP_KERNEL);
 	if (!tegra->phys) {
 		ret = -ENOMEM;
 		goto put_mbox;
 	}
+
 	for (i = 0, k = 0; i < tegra->soc->num_types; i++) {
 		char prop[8];
 
 		for (j = 0; j < tegra->soc->phy_types[i].num; j++) {
 			snprintf(prop, sizeof(prop), "%s-%d",
 				 tegra->soc->phy_types[i].name, j);
+
 			phy = devm_phy_optional_get(&pdev->dev, prop);
 			if (IS_ERR(phy)) {
 				ret = PTR_ERR(phy);
 				goto put_mbox;
 			}
+
 			tegra->phys[k++] = phy;
 		}
 	}
