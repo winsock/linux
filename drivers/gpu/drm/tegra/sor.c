@@ -1067,7 +1067,7 @@ static int tegra_sor_connector_get_modes(struct drm_connector *connector)
 	int err;
 
 	if (sor->aux)
-		drm_dp_aux_enable(sor->aux);
+		drm_dp_aux_enable(sor->aux, DRM_DP_AUX_MODE_AUX);
 
 	err = tegra_output_connector_get_modes(connector);
 
@@ -1209,7 +1209,7 @@ static void tegra_sor_edp_enable(struct drm_encoder *encoder)
 		drm_panel_prepare(output->panel);
 
 	if (sor->aux) {
-		err = drm_dp_aux_enable(sor->aux);
+		err = drm_dp_aux_enable(sor->aux, DRM_DP_AUX_MODE_AUX);
 		if (err < 0)
 			dev_err(sor->dev, "failed to enable DP: %d\n", err);
 
