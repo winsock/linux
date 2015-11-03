@@ -143,6 +143,8 @@ struct tegra_sor {
 	struct clk *clk_dp;
 	struct clk *clk;
 
+	struct pinctrl *pinctrl;
+
 	struct drm_dp_aux *aux;
 	struct drm_dp_link link;
 
@@ -214,6 +216,17 @@ static inline void tegra_sor_writel(struct tegra_sor *sor, u32 value,
 {
 	dev_dbg(sor->dev, "%08x < %08x\n", offset, value);
 	writel(value, sor->regs + (offset << 2));
+}
+
+static int tegra_sor_set_pinmux(struct tegra_sor *sor, const char *name)
+{
+	struct pinctrl_state *state;
+
+	state = pinctrl_lookup_state(sor->pinctrl, name);
+	if (IS_ERR(state))
+		return PTR_ERR(state);
+
+	return pinctrl_select_state(sor->pinctrl, state);
 }
 
 struct tegra_clk_sor_brick {
@@ -1558,16 +1571,25 @@ static int tegra_sor_connector_get_modes(struct drm_connector *connector)
 {
 	struct tegra_output *output = connector_to_output(connector);
 	struct tegra_sor *sor = to_sor(output);
+	const char *pinmux = "i2c";
 	int err;
 
 	if (sor->aux)
-		drm_dp_aux_enable(sor->aux, DRM_DP_AUX_MODE_AUX);
+		pinmux = "aux";
+
+	err = tegra_sor_set_pinmux(sor, pinmux);
+	if (err < 0)
+		goto out;
 
 	err = tegra_output_connector_get_modes(connector);
+	if (err < 0)
+		goto out;
 
-	if (sor->aux)
-		drm_dp_aux_disable(sor->aux);
+	err = tegra_sor_set_pinmux(sor, "off");
+	if (err < 0)
+		goto out;
 
+out:
 	return err;
 }
 
@@ -1973,16 +1995,16 @@ static void tegra_sor_edp_disable(struct drm_encoder *encoder)
 	if (err < 0)
 		dev_err(sor->dev, "failed to power down SOR: %d\n", err);
 
-	err = drm_dp_aux_disable(sor->aux);
-	if (err < 0)
-		dev_err(sor->dev, "failed to disable DP: %d\n", err);
-
 	err = tegra_io_rail_power_off(TEGRA_IO_RAIL_LVDS);
 	if (err < 0)
 		dev_err(sor->dev, "failed to power off I/O rail: %d\n", err);
 
 	if (output->panel)
 		drm_panel_unprepare(output->panel);
+
+	err = tegra_sor_set_pinmux(sor, "off");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
 
 	pm_runtime_put(sor->dev);
 }
@@ -2048,6 +2070,10 @@ static void tegra_sor_edp_enable(struct drm_encoder *encoder)
 
 	pm_runtime_get_sync(sor->dev);
 
+	err = tegra_sor_set_pinmux(sor, "aux");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
+
 	/* switch to safe parent clock */
 	err = tegra_sor_set_parent_clock(sor, sor->clk_safe);
 	if (err < 0)
@@ -2059,22 +2085,16 @@ static void tegra_sor_edp_enable(struct drm_encoder *encoder)
 
 	usleep_range(20, 100);
 
-	err = drm_dp_aux_enable(sor->aux, DRM_DP_AUX_MODE_AUX);
-	if (err < 0) {
-		dev_err(sor->dev, "failed to enable DPAUX pads: %d\n", err);
-		return;
-	}
-
 	err = drm_dp_link_probe(sor->aux, &sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to probe eDP link: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	err = drm_dp_link_choose(&sor->link, mode, info);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to choose link: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	if (output->panel)
@@ -2157,7 +2177,7 @@ static void tegra_sor_edp_enable(struct drm_encoder *encoder)
 	err = drm_dp_link_train(&sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "link training failed: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	dev_dbg(sor->dev, "link training succeeded\n");
@@ -2165,7 +2185,7 @@ static void tegra_sor_edp_enable(struct drm_encoder *encoder)
 	err = drm_dp_link_power_up(sor->aux, &sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to power up eDP link: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	/* compute configuration */
@@ -2175,7 +2195,7 @@ static void tegra_sor_edp_enable(struct drm_encoder *encoder)
 	err = tegra_sor_compute_config(sor, mode, &config, &sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to compute configuration: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	tegra_sor_apply_config(sor, &config);
@@ -2210,8 +2230,12 @@ static void tegra_sor_edp_enable(struct drm_encoder *encoder)
 	if (output->panel)
 		drm_panel_enable(output->panel);
 
-out:
-	drm_dp_aux_disable(sor->aux);
+	return;
+
+disable:
+	err = tegra_sor_set_pinmux(sor, "off");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
 }
 
 static int
@@ -2489,6 +2513,10 @@ static void tegra_sor_hdmi_disable(struct drm_encoder *encoder)
 	if (err < 0)
 		dev_err(sor->dev, "failed to power off HDMI rail: %d\n", err);
 
+	err = tegra_sor_set_pinmux(sor, "off");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
+
 	pm_runtime_put(sor->dev);
 }
 
@@ -2509,6 +2537,10 @@ static void tegra_sor_hdmi_enable(struct drm_encoder *encoder)
 	mode = &encoder->crtc->state->adjusted_mode;
 
 	pm_runtime_get_sync(sor->dev);
+
+	err = tegra_sor_set_pinmux(sor, "i2c");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
 
 	/* switch to safe parent clock */
 	err = tegra_sor_set_parent_clock(sor, sor->clk_safe);
@@ -2836,13 +2868,9 @@ static void tegra_sor_dp_disable(struct drm_encoder *encoder)
 	u32 value;
 	int err;
 
-	drm_dp_aux_enable(sor->aux);
-
 	err = drm_dp_link_power_down(sor->aux, &sor->link);
 	if (err < 0)
 		dev_err(sor->dev, "failed to power down link: %d\n", err);
-
-	drm_dp_aux_disable(sor->aux);
 
 	err = tegra_sor_detach(sor);
 	if (err < 0)
@@ -2875,6 +2903,10 @@ static void tegra_sor_dp_disable(struct drm_encoder *encoder)
 	if (err < 0)
 		dev_err(sor->dev, "failed to power off LVDS rail: %d\n", err);
 
+	err = tegra_sor_set_pinmux(sor, "off");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
+
 	pm_runtime_put(sor->dev);
 }
 
@@ -2897,6 +2929,10 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 
 	pm_runtime_get_sync(sor->dev);
 
+	err = tegra_sor_set_pinmux(sor, "aux");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
+
 	/* switch to safe parent clock */
 	err = tegra_sor_set_parent_clock(sor, sor->clk_safe);
 	if (err < 0)
@@ -2908,18 +2944,16 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 
 	usleep_range(20, 100);
 
-	drm_dp_aux_enable(sor->aux);
-
 	err = drm_dp_link_probe(sor->aux, &sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to probe DP link: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	err = drm_dp_link_choose(&sor->link, mode, info);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to choose link: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	value = tegra_sor_readl(sor, SOR_PLL2);
@@ -2982,7 +3016,7 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 	err = tegra_sor_set_parent_clock(sor, sor->clk_brick);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to set parent clock: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	/* use DP-A protocol */
@@ -3001,7 +3035,7 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 	err = drm_dp_link_train(&sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "link training failed: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	dev_dbg(sor->dev, "link training succeeded\n");
@@ -3009,7 +3043,7 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 	err = drm_dp_link_power_up(sor->aux, &sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to power up DP link: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	/* compute configuration */
@@ -3019,7 +3053,7 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 	err = tegra_sor_compute_config(sor, mode, &config, &sor->link);
 	if (err < 0) {
 		dev_err(sor->dev, "failed to compute configuration: %d\n", err);
-		goto out;
+		goto disable;
 	}
 
 	tegra_sor_apply_config(sor, &config);
@@ -3045,8 +3079,12 @@ static void tegra_sor_dp_enable(struct drm_encoder *encoder)
 	if (err < 0)
 		dev_err(sor->dev, "failed to wakeup SOR: %d\n", err);
 
-out:
-	drm_dp_aux_disable(sor->aux);
+	return;
+
+disable:
+	err = tegra_sor_set_pinmux(sor, "off");
+	if (err < 0)
+		dev_err(sor->dev, "failed to set pinmux: %d\n", err);
 }
 
 static const struct drm_encoder_helper_funcs tegra_sor_dp_helpers = {
@@ -3521,6 +3559,10 @@ static int tegra_sor_probe(struct platform_device *pdev)
 
 	sor->output.dev = sor->dev = &pdev->dev;
 	sor->soc = match->data;
+
+	sor->pinctrl = devm_pinctrl_get(&pdev->dev);
+	if (IS_ERR(sor->pinctrl))
+		return PTR_ERR(sor->pinctrl);
 
 	sor->settings = devm_kmemdup(&pdev->dev, sor->soc->settings,
 				     sor->soc->num_settings *
