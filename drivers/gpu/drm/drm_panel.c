@@ -201,15 +201,6 @@ struct drm_panel *of_drm_find_panel(struct device_node *np)
 {
 	struct registry_record *record;
 
-	mutex_lock(&panel_lock);
-
-	list_for_each_entry(panel, &panel_list, list) {
-		if (panel->dev->of_node == np) {
-			mutex_unlock(&panel_lock);
-			return panel;
-		}
-	}
-
 	record = registry_find_by_of_node(&panels, np);
 	if (record)
 		return container_of(record, struct drm_panel, record);
