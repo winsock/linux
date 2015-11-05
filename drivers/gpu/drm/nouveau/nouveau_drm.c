@@ -1036,8 +1036,10 @@ nouveau_platform_device_create(const struct nvkm_device_tegra_func *func,
 
 	err = nvkm_device_tegra_new(func, pdev, nouveau_config, nouveau_debug,
 				    true, true, ~0ULL, pdevice);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "nvkm_device_tegra_new() failed: %d\n", err);
 		goto err_free;
+	}
 
 	drm = drm_dev_alloc(&driver_platform, &pdev->dev);
 	if (!drm) {

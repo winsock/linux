@@ -2275,11 +2275,15 @@ nvkm_device_del(struct nvkm_device **pdevice)
 {
 	struct nvkm_device *device = *pdevice;
 	int i;
+	pr_info("> %s(pdevice=%p)\n", __func__, pdevice);
+	pr_info("  device: %p\n", device);
 	if (device) {
 		mutex_lock(&nv_devices_mutex);
 		device->disable_mask = 0;
 
-		if (nvkm_need_secure_boot(device))
+		pr_info("    chip: %p\n", device->chip);
+
+		if (device->chip && nvkm_need_secure_boot(device))
 			nvkm_secure_boot_fini(device);
 
 		for (i = NVKM_SUBDEV_NR - 1; i >= 0; i--) {
@@ -2301,6 +2305,8 @@ nvkm_device_del(struct nvkm_device **pdevice)
 		kfree(*pdevice);
 		*pdevice = NULL;
 	}
+
+	pr_info("< %s()\n", __func__);
 }
 
 int

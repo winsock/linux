@@ -246,6 +246,12 @@ of the following host1x client modules:
     - dpaux
   - vdd-supply: phandle of a supply that powers the DisplayPort link
 
+  The pads used by the DPAUX hardware are shared with an I2C controller. The
+  muxing is configured in the DPAUX hardware block and can be I2C or AUX. If
+  used with eDP/DP the pads should be configured in AUX mode to allow access
+  over the AUX channel. Otherwise the I2C mode can be used to enable the I2C
+  controller for DDC usage.
+
 Example:
 
 / {
