@@ -362,24 +362,6 @@ static int tegra_dpaux_probe(struct platform_device *pdev)
 	if (err < 0)
 		return err;
 
-	/*
-	 * Assume that by default the DPAUX/I2C pads will be used for HDMI,
-	 * so power them up and configure them in I2C mode.
-	 *
-	 * The DPAUX code paths reconfigure the pads in AUX mode, but there
-	 * is no possibility to perform the I2C mode configuration in the
-	 * HDMI path.
-	 */
-	value = tegra_dpaux_readl(dpaux, DPAUX_HYBRID_SPARE);
-	value &= ~DPAUX_HYBRID_SPARE_PAD_POWER_DOWN;
-	tegra_dpaux_writel(dpaux, value, DPAUX_HYBRID_SPARE);
-
-	value = tegra_dpaux_readl(dpaux, DPAUX_HYBRID_PADCTL);
-	value = DPAUX_HYBRID_PADCTL_I2C_SDA_INPUT_RCV |
-		DPAUX_HYBRID_PADCTL_I2C_SCL_INPUT_RCV |
-		DPAUX_HYBRID_PADCTL_MODE_I2C;
-	tegra_dpaux_writel(dpaux, value, DPAUX_HYBRID_PADCTL);
-
 	/* enable and clear all interrupts */
 	value = DPAUX_INTR_AUX_DONE | DPAUX_INTR_IRQ_EVENT |
 		DPAUX_INTR_UNPLUG_EVENT | DPAUX_INTR_PLUG_EVENT;
@@ -436,7 +418,7 @@ struct platform_driver tegra_dpaux_driver = {
 	.remove = tegra_dpaux_remove,
 };
 
-struct tegra_dpaux *tegra_dpaux_find_by_of_node(struct device_node *np)
+struct drm_dp_aux *drm_dp_aux_find_by_of_node(struct device_node *np)
 {
 	struct tegra_dpaux *dpaux;
 
@@ -445,7 +427,7 @@ struct tegra_dpaux *tegra_dpaux_find_by_of_node(struct device_node *np)
 	list_for_each_entry(dpaux, &dpaux_list, list)
 		if (np == dpaux->dev->of_node) {
 			mutex_unlock(&dpaux_lock);
-			return dpaux;
+			return &dpaux->aux;
 		}
 
 	mutex_unlock(&dpaux_lock);
@@ -453,8 +435,9 @@ struct tegra_dpaux *tegra_dpaux_find_by_of_node(struct device_node *np)
 	return NULL;
 }
 
-int tegra_dpaux_attach(struct tegra_dpaux *dpaux, struct tegra_output *output)
+int drm_dp_aux_attach(struct drm_dp_aux *aux, struct tegra_output *output)
 {
+	struct tegra_dpaux *dpaux = to_dpaux(aux);
 	unsigned long timeout;
 	int err;
 
@@ -470,7 +453,7 @@ int tegra_dpaux_attach(struct tegra_dpaux *dpaux, struct tegra_output *output)
 	while (time_before(jiffies, timeout)) {
 		enum drm_connector_status status;
 
-		status = tegra_dpaux_detect(dpaux);
+		status = drm_dp_aux_detect(aux);
 		if (status == connector_status_connected) {
 			enable_irq(dpaux->irq);
 			return 0;
@@ -482,8 +465,9 @@ int tegra_dpaux_attach(struct tegra_dpaux *dpaux, struct tegra_output *output)
 	return -ETIMEDOUT;
 }
 
-int tegra_dpaux_detach(struct tegra_dpaux *dpaux)
+int drm_dp_aux_detach(struct drm_dp_aux *aux)
 {
+	struct tegra_dpaux *dpaux = to_dpaux(aux);
 	unsigned long timeout;
 	int err;
 
@@ -498,7 +482,7 @@ int tegra_dpaux_detach(struct tegra_dpaux *dpaux)
 	while (time_before(jiffies, timeout)) {
 		enum drm_connector_status status;
 
-		status = tegra_dpaux_detect(dpaux);
+		status = drm_dp_aux_detect(aux);
 		if (status == connector_status_disconnected) {
 			dpaux->output = NULL;
 			return 0;
@@ -510,8 +494,9 @@ int tegra_dpaux_detach(struct tegra_dpaux *dpaux)
 	return -ETIMEDOUT;
 }
 
-enum drm_connector_status tegra_dpaux_detect(struct tegra_dpaux *dpaux)
+enum drm_connector_status drm_dp_aux_detect(struct drm_dp_aux *aux)
 {
+	struct tegra_dpaux *dpaux = to_dpaux(aux);
 	u32 value;
 
 	value = tegra_dpaux_readl(dpaux, DPAUX_DP_AUXSTAT);
@@ -522,16 +507,25 @@ enum drm_connector_status tegra_dpaux_detect(struct tegra_dpaux *dpaux)
 	return connector_status_disconnected;
 }
 
-int tegra_dpaux_enable(struct tegra_dpaux *dpaux)
+int drm_dp_aux_enable(struct drm_dp_aux *aux, enum drm_dp_aux_mode mode)
 {
+	struct tegra_dpaux *dpaux = to_dpaux(aux);
 	u32 value;
 
-	value = DPAUX_HYBRID_PADCTL_AUX_CMH(2) |
-		DPAUX_HYBRID_PADCTL_AUX_DRVZ(4) |
-		DPAUX_HYBRID_PADCTL_AUX_DRVI(0x18) |
-		DPAUX_HYBRID_PADCTL_AUX_INPUT_RCV |
-		DPAUX_HYBRID_PADCTL_MODE_AUX;
-	tegra_dpaux_writel(dpaux, value, DPAUX_HYBRID_PADCTL);
+	if (mode == DRM_DP_AUX_MODE_I2C) {
+		value = tegra_dpaux_readl(dpaux, DPAUX_HYBRID_PADCTL);
+		value = DPAUX_HYBRID_PADCTL_I2C_SDA_INPUT_RCV |
+			DPAUX_HYBRID_PADCTL_I2C_SCL_INPUT_RCV |
+			DPAUX_HYBRID_PADCTL_MODE_I2C;
+		tegra_dpaux_writel(dpaux, value, DPAUX_HYBRID_PADCTL);
+	} else {
+		value = DPAUX_HYBRID_PADCTL_AUX_CMH(2) |
+			DPAUX_HYBRID_PADCTL_AUX_DRVZ(4) |
+			DPAUX_HYBRID_PADCTL_AUX_DRVI(0x18) |
+			DPAUX_HYBRID_PADCTL_AUX_INPUT_RCV |
+			DPAUX_HYBRID_PADCTL_MODE_AUX;
+		tegra_dpaux_writel(dpaux, value, DPAUX_HYBRID_PADCTL);
+	}
 
 	value = tegra_dpaux_readl(dpaux, DPAUX_HYBRID_SPARE);
 	value &= ~DPAUX_HYBRID_SPARE_PAD_POWER_DOWN;
@@ -540,8 +534,9 @@ int tegra_dpaux_enable(struct tegra_dpaux *dpaux)
 	return 0;
 }
 
-int tegra_dpaux_disable(struct tegra_dpaux *dpaux)
+int drm_dp_aux_disable(struct drm_dp_aux *aux)
 {
+	struct tegra_dpaux *dpaux = to_dpaux(aux);
 	u32 value;
 
 	value = tegra_dpaux_readl(dpaux, DPAUX_HYBRID_SPARE);
@@ -551,11 +546,11 @@ int tegra_dpaux_disable(struct tegra_dpaux *dpaux)
 	return 0;
 }
 
-int tegra_dpaux_prepare(struct tegra_dpaux *dpaux, u8 encoding)
+int drm_dp_aux_prepare(struct drm_dp_aux *aux, u8 encoding)
 {
 	int err;
 
-	err = drm_dp_dpcd_writeb(&dpaux->aux, DP_MAIN_LINK_CHANNEL_CODING_SET,
+	err = drm_dp_dpcd_writeb(aux, DP_MAIN_LINK_CHANNEL_CODING_SET,
 				 encoding);
 	if (err < 0)
 		return err;
@@ -563,15 +558,15 @@ int tegra_dpaux_prepare(struct tegra_dpaux *dpaux, u8 encoding)
 	return 0;
 }
 
-int tegra_dpaux_train(struct tegra_dpaux *dpaux, struct drm_dp_link *link,
-		      u8 pattern)
+int drm_dp_aux_train(struct drm_dp_aux *aux, struct drm_dp_link *link,
+		     u8 pattern)
 {
 	u8 tp = pattern & DP_TRAINING_PATTERN_MASK;
 	u8 status[DP_LINK_STATUS_SIZE], values[4];
 	unsigned int i;
 	int err;
 
-	err = drm_dp_dpcd_writeb(&dpaux->aux, DP_TRAINING_PATTERN_SET, pattern);
+	err = drm_dp_dpcd_writeb(aux, DP_TRAINING_PATTERN_SET, pattern);
 	if (err < 0)
 		return err;
 
@@ -584,14 +579,14 @@ int tegra_dpaux_train(struct tegra_dpaux *dpaux, struct drm_dp_link *link,
 			    DP_TRAIN_MAX_SWING_REACHED |
 			    DP_TRAIN_VOLTAGE_SWING_LEVEL_0;
 
-	err = drm_dp_dpcd_write(&dpaux->aux, DP_TRAINING_LANE0_SET, values,
+	err = drm_dp_dpcd_write(aux, DP_TRAINING_LANE0_SET, values,
 				link->lanes);
 	if (err < 0)
 		return err;
 
 	usleep_range(500, 1000);
 
-	err = drm_dp_dpcd_read_link_status(&dpaux->aux, status);
+	err = drm_dp_dpcd_read_link_status(aux, status);
 	if (err < 0)
 		return err;
 
@@ -609,11 +604,11 @@ int tegra_dpaux_train(struct tegra_dpaux *dpaux, struct drm_dp_link *link,
 		break;
 
 	default:
-		dev_err(dpaux->dev, "unsupported training pattern %u\n", tp);
+		dev_err(aux->dev, "unsupported training pattern %u\n", tp);
 		return -EINVAL;
 	}
 
-	err = drm_dp_dpcd_writeb(&dpaux->aux, DP_EDP_CONFIGURATION_SET, 0);
+	err = drm_dp_dpcd_writeb(aux, DP_EDP_CONFIGURATION_SET, 0);
 	if (err < 0)
 		return err;
 
