@@ -39,13 +39,12 @@ struct imx_drm_component {
 struct imx_drm_device {
 	struct drm_device			*drm;
 	struct imx_drm_crtc			*crtc[MAX_CRTC];
-	int					pipes;
+	unsigned int				pipes;
 	struct drm_fbdev_cma			*fbhelper;
 };
 
 struct imx_drm_crtc {
 	struct drm_crtc				*crtc;
-	int					pipe;
 	struct imx_drm_crtc_helper_funcs	imx_drm_helper_funcs;
 };
 
@@ -54,9 +53,9 @@ static int legacyfb_depth = 16;
 module_param(legacyfb_depth, int, 0444);
 #endif
 
-int imx_drm_crtc_id(struct imx_drm_crtc *crtc)
+unsigned int imx_drm_crtc_id(struct imx_drm_crtc *crtc)
 {
-	return crtc->pipe;
+	return drm_crtc_index(crtc->crtc);
 }
 EXPORT_SYMBOL_GPL(imx_drm_crtc_id);
 
@@ -125,19 +124,19 @@ EXPORT_SYMBOL_GPL(imx_drm_set_bus_format);
 
 int imx_drm_crtc_vblank_get(struct imx_drm_crtc *imx_drm_crtc)
 {
-	return drm_vblank_get(imx_drm_crtc->crtc->dev, imx_drm_crtc->pipe);
+	return drm_crtc_vblank_get(imx_drm_crtc->crtc);
 }
 EXPORT_SYMBOL_GPL(imx_drm_crtc_vblank_get);
 
 void imx_drm_crtc_vblank_put(struct imx_drm_crtc *imx_drm_crtc)
 {
-	drm_vblank_put(imx_drm_crtc->crtc->dev, imx_drm_crtc->pipe);
+	drm_crtc_vblank_put(imx_drm_crtc->crtc);
 }
 EXPORT_SYMBOL_GPL(imx_drm_crtc_vblank_put);
 
 void imx_drm_handle_vblank(struct imx_drm_crtc *imx_drm_crtc)
 {
-	drm_handle_vblank(imx_drm_crtc->crtc->dev, imx_drm_crtc->pipe);
+	drm_crtc_handle_vblank(imx_drm_crtc->crtc);
 }
 EXPORT_SYMBOL_GPL(imx_drm_handle_vblank);
 
@@ -176,7 +175,7 @@ static void imx_drm_disable_vblank(struct drm_device *drm, unsigned int pipe)
 static void imx_drm_driver_preclose(struct drm_device *drm,
 		struct drm_file *file)
 {
-	int i;
+	unsigned int i;
 
 	if (!file->is_master)
 		return;
@@ -357,12 +356,11 @@ int imx_drm_add_crtc(struct drm_device *drm, struct drm_crtc *crtc,
 		return -ENOMEM;
 
 	imx_drm_crtc->imx_drm_helper_funcs = *imx_drm_helper_funcs;
-	imx_drm_crtc->pipe = imxdrm->pipes++;
 	imx_drm_crtc->crtc = crtc;
 
 	crtc->port = port;
 
-	imxdrm->crtc[imx_drm_crtc->pipe] = imx_drm_crtc;
+	imxdrm->crtc[imxdrm->pipes++] = imx_drm_crtc;
 
 	*new_crtc = imx_drm_crtc;
 
@@ -379,7 +377,7 @@ int imx_drm_add_crtc(struct drm_device *drm, struct drm_crtc *crtc,
 	return 0;
 
 err_register:
-	imxdrm->crtc[imx_drm_crtc->pipe] = NULL;
+	imxdrm->crtc[--imxdrm->pipes] = NULL;
 	kfree(imx_drm_crtc);
 	return ret;
 }
@@ -391,10 +389,11 @@ EXPORT_SYMBOL_GPL(imx_drm_add_crtc);
 int imx_drm_remove_crtc(struct imx_drm_crtc *imx_drm_crtc)
 {
 	struct imx_drm_device *imxdrm = imx_drm_crtc->crtc->dev->dev_private;
+	unsigned int pipe = drm_crtc_index(imx_drm_crtc->crtc);
 
 	drm_crtc_cleanup(imx_drm_crtc->crtc);
 
-	imxdrm->crtc[imx_drm_crtc->pipe] = NULL;
+	imxdrm->crtc[pipe] = NULL;
 
 	kfree(imx_drm_crtc);
 

@@ -181,7 +181,7 @@ static int amdgpu_info_ioctl(struct drm_device *dev, void *data, struct drm_file
 			crtc = (struct drm_crtc *)minfo->crtcs[i];
 			if (crtc && crtc->base.id == info->mode_crtc.id) {
 				struct amdgpu_crtc *amdgpu_crtc = to_amdgpu_crtc(crtc);
-				ui32 = amdgpu_crtc->crtc_id;
+				ui32 = amdgpu_crtc->pipe;
 				found = 1;
 				break;
 			}
@@ -683,7 +683,7 @@ int amdgpu_get_vblank_timestamp_kms(struct drm_device *dev, unsigned int pipe,
 	crtc = &adev->mode_info.crtcs[pipe]->base;
 
 	/* Helper routine in DRM core does all the work: */
-	return drm_calc_vbltimestamp_from_scanoutpos(dev, pipe, max_error,
+	return drm_calc_vbltimestamp_from_scanoutpos(crtc, max_error,
 						     vblank_time, flags,
 						     &crtc->hwmode);
 }

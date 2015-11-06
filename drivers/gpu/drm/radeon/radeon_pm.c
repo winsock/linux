@@ -1756,10 +1756,12 @@ static bool radeon_pm_in_vbl(struct radeon_device *rdev)
 	 * otherwise return in_vbl == false.
 	 */
 	for (crtc = 0; (crtc < rdev->num_crtc) && in_vbl; crtc++) {
+		struct radeon_crtc *radeon_crtc = rdev->mode_info.crtcs[crtc];
+
 		if (rdev->pm.active_crtcs & (1 << crtc)) {
-			vbl_status = radeon_get_crtc_scanoutpos(rdev->ddev, crtc, 0,
+			vbl_status = radeon_crtc_get_scanoutpos(&radeon_crtc->base, 0,
 								&vpos, &hpos, NULL, NULL,
-								&rdev->mode_info.crtcs[crtc]->base.hwmode);
+								&radeon_crtc->base.hwmode);
 			if ((vbl_status & DRM_SCANOUTPOS_VALID) &&
 			    !(vbl_status & DRM_SCANOUTPOS_IN_VBLANK))
 				in_vbl = false;
