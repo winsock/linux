@@ -143,6 +143,7 @@ static int pwm_backlight_parse_dt(struct device *dev,
 		return -ENODEV;
 
 	memset(data, 0, sizeof(*data));
+	data->pwm_id = -1;
 
 	/* determine the number of brightness levels */
 	prop = of_find_property(node, "brightness-levels", &length);
@@ -175,6 +176,7 @@ static int pwm_backlight_parse_dt(struct device *dev,
 	}
 
 	data->enable_gpio = -EINVAL;
+
 	return 0;
 }
 
@@ -320,7 +322,21 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 	}
 
 	bl->props.brightness = data->dft_brightness;
-	backlight_update_status(bl);
+	bl->props.power = FB_BLANK_UNBLANK;
+
+	/*
+	 * When platform data was associated with the device, assume that the
+	 * device wasn't instantiated from device tree. In these legacy cases
+	 * the backlight is usually a standalone object only controlled from
+	 * userspace. It must therefore be enabled at probe time for backward
+	 * compatibility.
+	 *
+	 * If the device was instantiated from the device tree, assume that a
+	 * display driver will take control of the backlight and enable it at
+	 * the right time.
+	 */
+	if (data != &defdata)
+		backlight_update_status(bl);
 
 	platform_set_drvdata(pdev, bl);
 	return 0;
