@@ -683,7 +683,7 @@ static int tegra_gem_set_tiling(struct drm_device *drm, void *data,
 	bo->tiling.mode = mode;
 	bo->tiling.value = value;
 
-	drm_gem_object_unreference(gem);
+	drm_gem_object_unreference_unlocked(gem);
 
 	return 0;
 }
