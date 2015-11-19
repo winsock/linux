@@ -19,6 +19,8 @@
 #include <soc/tegra/ahb.h>
 #include <soc/tegra/mc.h>
 
+#include <asm/cacheflush.h>
+
 struct tegra_smmu {
 	void __iomem *regs;
 	struct device *dev;
@@ -48,6 +50,24 @@ struct tegra_smmu_as {
 	unsigned id;
 	u32 attr;
 };
+
+static void smmu_flush_dcache(struct page *page, unsigned long offset,
+                             size_t size)
+{
+#ifdef CONFIG_ARM
+       phys_addr_t phys = page_to_phys(page) + offset;
+#endif
+       void *virt = page_address(page) + offset;
+
+#ifdef CONFIG_ARM
+       __cpuc_flush_dcache_area(virt, size);
+       outer_flush_range(phys, phys + size);
+#endif
+
+#ifdef CONFIG_ARM64
+       __flush_dcache_area(virt, size);
+#endif
+}
 
 static struct tegra_smmu_as *to_smmu_as(struct iommu_domain *dom)
 {
@@ -167,7 +187,7 @@ static void smmu_flush_ptc_all(struct tegra_smmu *smmu)
 static inline void smmu_flush_ptc(struct tegra_smmu *smmu, dma_addr_t dma,
 				  unsigned long offset)
 {
-	u32 value;
+	u32 value = 0;
 
 	offset &= ~(smmu->mc->soc->atom_size - 1);
 
@@ -179,9 +199,9 @@ static inline void smmu_flush_ptc(struct tegra_smmu *smmu, dma_addr_t dma,
 #else
 		value = 0;
 #endif
-		smmu_writel(smmu, value, SMMU_PTC_FLUSH_HI);
 	}
 
+	smmu_writel(smmu, value, SMMU_PTC_FLUSH_HI);
 	value = (dma + offset) | SMMU_PTC_FLUSH_TYPE_ADR;
 	smmu_writel(smmu, value, SMMU_PTC_FLUSH);
 
@@ -410,6 +430,7 @@ static int tegra_smmu_as_prepare(struct tegra_smmu *smmu,
 	if (err < 0)
 		goto err_unmap;
 
+	smmu_flush_dcache(as->pd, 0, SMMU_SIZE_PD);
 	smmu_flush_ptc(smmu, as->pd_dma, 0);
 	smmu_flush_tlb_asid(smmu, as->id);
 
@@ -517,6 +538,7 @@ static void tegra_smmu_set_pde(struct tegra_smmu_as *as, unsigned long iova,
 					 sizeof(*pd), DMA_TO_DEVICE);
 
 	/* And flush the iommu */
+	smmu_flush_dcache(as->pd, offset, 4);
 	smmu_flush_ptc(smmu, as->pd_dma, offset);
 	smmu_flush_tlb_section(smmu, as->id, iova);
 	smmu_flush(smmu);
@@ -576,8 +598,10 @@ static u32 *as_get_pte(struct tegra_smmu_as *as, dma_addr_t iova,
 
 		as->pts[pde] = page;
 
+		smmu_flush_dcache(page, 0, SMMU_SIZE_PT);
 		tegra_smmu_set_pde(as, iova, SMMU_MK_PDE(dma, SMMU_PDE_ATTR |
 							      SMMU_PDE_NEXT));
+		smmu_flush_dcache(as->pd, pde << 2, 4);
 
 		*dmap = dma;
 	} else {
